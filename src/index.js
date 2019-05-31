@@ -1,10 +1,10 @@
 import pathToRegexp from 'path-to-regexp'
 import React from 'react'
-import { parse } from 'url'
+import {parse} from 'url'
 import NextLink from 'next/link'
 import NextRouter from 'next/router'
 
-export default opts => new Routes(opts)
+module.exports = opts => new Routes(opts)
 
 class Routes {
   constructor ({
@@ -16,18 +16,19 @@ class Routes {
     this.Router = this.getRouter(Router)
   }
 
-  add (name, pattern, page) {
+  add (name, pattern, page, data) {
     let options
     if (name instanceof Object) {
       options = name
       name = options.name
     } else {
       if (name[0] === '/') {
+        data = page
         page = pattern
         pattern = name
         name = null
       }
-      options = { name, pattern, page }
+      options = {name, pattern, page, data}
     }
 
     if (this.findByName(name)) {
@@ -40,32 +41,33 @@ class Routes {
 
   findByName (name) {
     if (name) {
-      return this.routes.filter(route => route.name === name)[0]
+      return this.routes.find(route => route.name === name)
     }
   }
 
   match (url) {
     const parsedUrl = parse(url, true)
-    const { pathname, query } = parsedUrl
+    const {pathname, query} = parsedUrl
 
-    return this.routes.reduce((result, route) => {
-      if (result.route) return result
-      const params = route.match(pathname)
-      if (!params) return result
-      return { ...result, route, params, query: { ...query, ...params } }
-    }, { query, parsedUrl })
+    let params
+    const route = this.routes.find(route => {
+      params = route.match(pathname)
+      return params
+    })
+
+    return { parsedUrl, route, params, query: { ...query, ...(params || {}) } }
   }
 
   findAndGetUrls (nameOrUrl, params) {
     const route = this.findByName(nameOrUrl)
 
     if (route) {
-      return { route, urls: route.getUrls(params), byName: true }
+      return {route, urls: route.getUrls(params), byName: true}
     } else {
-      const { route, query } = this.match(nameOrUrl)
+      const {route, query} = this.match(nameOrUrl)
       const href = route ? route.getHref(query) : nameOrUrl
-      const urls = { href, as: nameOrUrl }
-      return { route, urls }
+      const urls = {href, as: nameOrUrl}
+      return {route, urls}
     }
   }
 
@@ -73,13 +75,14 @@ class Routes {
     const nextHandler = app.getRequestHandler()
 
     return (req, res) => {
-      const { route, query, parsedUrl } = this.match(req.url)
+      const {route, query, parsedUrl, params} = this.match(req.url)
 
       if (route) {
         if (customHandler) {
-          customHandler({ req, res, route, query })
+          customHandler({req, res, route, query})
         } else {
-          app.render(req, res, route.page, query)
+          const {name, data} = route
+          app.render(req, res, route.getPage({params, name, data}), query)
         }
       } else {
         nextHandler(req, res, parsedUrl)
@@ -89,7 +92,7 @@ class Routes {
 
   getLink (Link) {
     const LinkRoutes = props => {
-      const { route, params, to, ...newProps } = props
+      const {route, params, to, ...newProps} = props
       const nameOrUrl = route || to
 
       if (nameOrUrl) {
@@ -103,7 +106,7 @@ class Routes {
 
   getRouter (Router) {
     const wrap = method => (route, params, options) => {
-      const { byName, urls: { as, href } } = this.findAndGetUrls(route, params)
+      const {byName, urls: {as, href}} = this.findAndGetUrls(route, params)
       return Router[method](href, as, byName ? options : params)
     }
 
@@ -115,16 +118,15 @@ class Routes {
 }
 
 class Route {
-  constructor ({ name, pattern, page = name }) {
-    if (!name && !page) {
-      throw new Error(`Missing page to render for route "${pattern}"`)
+  constructor ({name, pattern, page = name}) {
+    if (!name) {
+      throw new Error(`Missing name to render for route "${pattern}"`)
     }
 
     this.name = name
     this.pattern = pattern || `/${name}`
-    this.page = page.replace(/(^|\/)index$/, '').replace(/^\/?/, '/')
+    this.getPage = createGetPage(page)
     this.regex = pathToRegexp(this.pattern, this.keys = [])
-    this.keyNames = this.keys.map(key => key.name)
     this.toPath = pathToRegexp.compile(this.pattern)
   }
 
@@ -145,41 +147,59 @@ class Route {
   }
 
   getHref (params = {}) {
-    return `${this.page}?${toQuerystring(params)}`
+    return `${this.getPage({ name: this.name, data: this.data, params })}?${toQuerystring(params)}`
   }
 
   getAs (params = {}) {
     const as = this.toPath(params) || '/'
-    const keys = Object.keys(params)
-    const qsKeys = keys.filter(key => this.keyNames.indexOf(key) === -1)
 
-    if (!qsKeys.length) return as
+    const qsParams = {}
+    let hasQs = false
+    this.keys.forEach(({ name }) => {
+      if (params[name]) {
+        qsParams[name] = params[name]
+        hasQs = true
+      }
+    })
 
-    const qsParams = qsKeys.reduce((qs, key) => Object.assign(qs, {
-      [key]: params[key]
-    }), {})
-
+    if (!hasQs) return as
     return `${as}?${toQuerystring(qsParams)}`
   }
 
   getUrls (params) {
     const as = this.getAs(params)
     const href = this.getHref(params)
-    return { as, href }
+    return {as, href}
   }
 }
 
-const toQuerystring = obj =>
-  Object.keys(obj)
-    .filter(key => obj[key] !== null && obj[key] !== undefined)
-    .map(key => {
-      let value = obj[key]
+const toQuerystring = obj => Object.keys(obj)
+  .filter(key => obj[key] !== null && obj[key] !== undefined)
+  .map(key => {
+    let value = obj[key]
 
-      if (Array.isArray(value)) {
-        return value
-          .map(arrayValue => `${encodeURIComponent(key)}=${encodeURIComponent(arrayValue)}`)
-          .join('&')
-      }
-      return [encodeURIComponent(key), encodeURIComponent(value)].join('=')
-    })
-    .join('&')
+    if (Array.isArray(value)) {
+      value = value.join('/')
+    }
+    return [
+      encodeURIComponent(key),
+      encodeURIComponent(value)
+    ].join('=')
+  }).join('&')
+
+const cleanPage = page => page.replace(/(^|\/)index$/, '').replace(/^\/?/, '/')
+
+const createGetPage = page => {
+  if (typeof page === 'string') {
+    if (page[0] === '/') {
+      const toPath = pathToRegexp.compile(page)
+      return ({ params }) => toPath(params)
+    }
+    const cleanedPage = cleanPage(page)
+    return () => cleanedPage
+  }
+  if (typeof page !== 'function') {
+    throw new Error(`Page must be a string or a function, got ${typeof page}`)
+  }
+  return page
+}
