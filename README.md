@@ -51,9 +51,16 @@ Arguments:
 
 - `name` - Route name
 - `pattern` - Route pattern (like express, see [path-to-regexp](https://github.com/pillarjs/path-to-regexp))
-- `page` - Page inside `./pages` to be rendered
+- `page` - Page inside `./pages` to be rendered. Can be a function: 
 
-The page component receives the matched URL parameters merged into `query`
+```javascript
+({ name, params: { param1, param2 }, data }) => '${param1}/${param2}'
+```
+ or a path:
+``` 
+/:param1/:param2
+```
+Assuming `param1 = 'a' and param2 = 'b' ` Both of these examples would resolve to `./pages/a/b.js` and the page component receives the matched URL parameters merged into `query`
 
 ```javascript
 export default class Blog extends React.Component {

@@ -118,12 +118,13 @@ class Routes {
 }
 
 class Route {
-  constructor ({name, pattern, page = name}) {
+  constructor ({name, pattern, page = name, data}) {
     if (!name) {
       throw new Error(`Missing name to render for route "${pattern}"`)
     }
 
     this.name = name
+    this.data = data
     this.pattern = pattern || `/${name}`
     this.getPage = createGetPage(page)
     this.regex = pathToRegexp(this.pattern, this.keys = [])
