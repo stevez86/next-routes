@@ -154,17 +154,15 @@ class Route {
   getAs (params = {}) {
     const as = this.toPath(params) || '/'
 
-    const qsParams = {}
-    let hasQs = false
+    const qsParams = { ...params }
     this.keys.forEach(({ name }) => {
       if (params[name]) {
-        qsParams[name] = params[name]
-        hasQs = true
+        delete qsParams[name]
       }
     })
 
-    if (!hasQs) return as
-    return `${as}?${toQuerystring(qsParams)}`
+    const qs = toQuerystring(qsParams)
+    return `${as}${qs ? `?${qs}` : ''}`
   }
 
   getUrls (params) {
